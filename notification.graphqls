@@ -1,0 +1,13 @@
+extend type Query {
+  listNotifications(recipient: String): [Notification!]!
+}
+
+type Notification {
+  id: ID!
+  recipient: String!
+  channel: String!
+  subject: String!
+  body: String!
+  status: String!
+  createdAt: Time!
+}

@@ -1,0 +1,16 @@
+# CodeRabbit Configuration File
+# Reference: https://docs.coderabbit.ai/spec/configuration
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: "en-US"
+
+reviews:
+  profile: "assertive"
+  tone_instructions: "Review code as a senior Go software engineer with a focus on notification and messaging domains, SMTP integrations, multi-channel routing, and API contracts."
+  auto_review:
+    enabled: true
+    drafts: false
+  high_level_summary: true
+
+chat:
+  auto_reply: true
