@@ -1,5 +1,15 @@
 extend type Query {
   listNotifications(recipient: String): [Notification!]!
+  listEventTriggers: [EventTrigger!]!
+  listScheduledNotifications: [ScheduledNotification!]!
+}
+
+extend type Mutation {
+  createEventTrigger(input: CreateEventTriggerInput!): EventTrigger!
+  deleteEventTrigger(id: ID!): Boolean!
+  
+  scheduleNotification(input: ScheduleNotificationInput!): ScheduledNotification!
+  cancelScheduledNotification(id: ID!): Boolean!
 }
 
 type Notification {
@@ -10,4 +20,48 @@ type Notification {
   body: String!
   status: String!
   createdAt: Time!
+}
+
+type EventTrigger {
+  id: ID!
+  namespace: String!
+  event: String!
+  channel: String!
+  sender: String
+  recipientTemplate: String!
+  subjectTemplate: String
+  bodyTemplate: String!
+  enabled: Boolean!
+}
+
+type ScheduledNotification {
+  id: ID!
+  sender: String
+  recipient: String!
+  channel: String!
+  subject: String
+  body: String!
+  scheduledAt: Time!
+  cronExpression: String
+  status: String!
+}
+
+input CreateEventTriggerInput {
+  namespace: String!
+  event: String!
+  channel: String!
+  sender: String
+  recipientTemplate: String!
+  subjectTemplate: String
+  bodyTemplate: String!
+}
+
+input ScheduleNotificationInput {
+  sender: String
+  recipient: String!
+  channel: String!
+  subject: String
+  body: String!
+  scheduledAt: Time!
+  cronExpression: String
 }

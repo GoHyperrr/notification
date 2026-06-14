@@ -3,19 +3,28 @@ package notification
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/GoHyperrr/mdk"
+	"github.com/google/uuid"
 )
 
 // Module implements the mdk.Module interface for Notification.
 type Module struct {
-	repo     *Repository
-	provider Provider
-	rt       mdk.Runtime
+	repo               *Repository
+	provider           Provider
+	rt                 mdk.Runtime
+	schedulerCtxCancel context.CancelFunc
+	activeTriggers     map[string]func()
+	triggersMu         sync.Mutex
 }
 
 func NewModule(provider Provider) *Module {
-	return &Module{provider: provider}
+	return &Module{
+		provider:       provider,
+		activeTriggers: make(map[string]func()),
+	}
 }
 
 func (m *Module) ID() string {
@@ -150,15 +159,32 @@ func (m *Module) Init(ctx context.Context, rt mdk.Runtime) error {
 		return nil
 	})
 
+	// Start scheduler background worker
+	schCtx, cancel := context.WithCancel(ctx)
+	m.schedulerCtxCancel = cancel
+	go m.startScheduler(schCtx)
+
+	// Register dynamic event triggers
+	m.registerDynamicTriggers(ctx)
+
 	return nil
 }
 
 func (m *Module) Shutdown(ctx context.Context) error {
+	if m.schedulerCtxCancel != nil {
+		m.schedulerCtxCancel()
+	}
+	m.triggersMu.Lock()
+	for _, unsub := range m.activeTriggers {
+		unsub()
+	}
+	m.activeTriggers = make(map[string]func())
+	m.triggersMu.Unlock()
 	return nil
 }
 
 func (m *Module) Models() []any {
-	return []any{&Notification{}}
+	return []any{&Notification{}, &EventTrigger{}, &ScheduledNotification{}}
 }
 
 func (m *Module) Routes() []mdk.Route {
@@ -182,6 +208,135 @@ func (m *Module) SendNotificationStep(sCtx mdk.StepContext) mdk.StepResult {
 		return mdk.StepResult{Output: map[string]any{"notification": resMap}}
 	}
 	return mdk.StepResult{}
+}
+
+func (m *Module) startScheduler(ctx context.Context) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.processSchedules(ctx)
+		}
+	}
+}
+
+func (m *Module) processSchedules(ctx context.Context) {
+	if m.rt == nil || m.rt.DB() == nil {
+		return
+	}
+	var pending []ScheduledNotification
+	now := time.Now()
+
+	if err := m.rt.DB().Where("status = ? AND scheduled_at <= ?", "PENDING", now).Find(&pending).Error; err != nil {
+		return
+	}
+
+	for _, job := range pending {
+		n := &Notification{
+			ID:        "notif_" + uuid.New().String(),
+			Sender:    job.Sender,
+			Recipient: job.Recipient,
+			Channel:   NotificationChannel(job.Channel),
+			Subject:   job.Subject,
+			Body:      job.Body,
+			Status:    StatusPending,
+		}
+
+		err := m.repo.Save(ctx, n)
+		if err == nil {
+			err = m.provider.Send(ctx, n)
+		}
+
+		tx := m.rt.DB().Begin()
+		if err != nil {
+			n.Status = StatusFailed
+			_ = m.repo.Save(ctx, n)
+
+			job.Status = "FAILED"
+			tx.Save(&job)
+			tx.Commit()
+			continue
+		}
+
+		n.Status = StatusSent
+		_ = m.repo.Save(ctx, n)
+
+		job.LastRunAt = &now
+		if job.CronExpression == "" {
+			job.Status = "SENT"
+		} else {
+			nextRun, parseErr := parseCronAndGetNext(job.CronExpression, now)
+			if parseErr != nil {
+				job.Status = "FAILED"
+				m.rt.Logger().Error("scheduler: invalid cron expression", "expr", job.CronExpression, "err", parseErr)
+			} else {
+				job.ScheduledAt = nextRun
+				job.Status = "PENDING"
+			}
+		}
+		tx.Save(&job)
+		tx.Commit()
+	}
+}
+
+func (m *Module) registerDynamicTriggers(ctx context.Context) {
+	if m.rt == nil || m.rt.DB() == nil {
+		return
+	}
+	var triggers []EventTrigger
+	if err := m.rt.DB().Where("enabled = ?", true).Find(&triggers).Error; err != nil {
+		return
+	}
+
+	for _, t := range triggers {
+		m.subscribeTrigger(ctx, t)
+	}
+}
+
+func (m *Module) subscribeTrigger(ctx context.Context, t EventTrigger) {
+	m.triggersMu.Lock()
+	defer m.triggersMu.Unlock()
+
+	if unsub, ok := m.activeTriggers[t.ID]; ok {
+		unsub()
+	}
+
+	unsub, err := m.rt.Bus().Subscribe(t.Namespace, t.Event, func(ctx context.Context, event mdk.Event) error {
+		recipient := resolveTemplate(t.RecipientTemplate, event.Payload)
+		subject := resolveTemplate(t.SubjectTemplate, event.Payload)
+		body := resolveTemplate(t.BodyTemplate, event.Payload)
+
+		input := map[string]any{
+			"input": map[string]any{
+				"sender":    t.Sender,
+				"recipient": recipient,
+				"channel":   t.Channel,
+				"subject":   subject,
+				"body":      body,
+			},
+		}
+
+		_, err := m.SendNotification(ctx, input)
+		return err
+	})
+
+	if err == nil {
+		m.activeTriggers[t.ID] = unsub
+	}
+}
+
+func (m *Module) unsubscribeTrigger(id string) {
+	m.triggersMu.Lock()
+	defer m.triggersMu.Unlock()
+
+	if unsub, ok := m.activeTriggers[id]; ok {
+		unsub()
+		delete(m.activeTriggers, id)
+	}
 }
 
 func getString(m map[string]any, key string) string {
