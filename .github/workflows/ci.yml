@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout notification
+        uses: actions/checkout@v4
+      - name: Checkout mdk
+        uses: actions/checkout@v4
+        with:
+          repository: GoHyperrr/mdk
+          path: mdk
+      - name: Fetch matching branch for mdk
+        run: |
+          cd mdk
+          BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
+          if git fetch origin "$BRANCH_NAME":"$BRANCH_NAME" 2>/dev/null; then
+            echo "Checking out matching branch: $BRANCH_NAME"
+            git checkout "$BRANCH_NAME"
+          else
+            echo "Matching branch $BRANCH_NAME not found in GoHyperrr/mdk, staying on default branch."
+          fi
+        shell: bash
+      - name: Move mdk to parent directory
+        run: mv mdk ../mdk
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Initialize temporary go.work
+        run: |
+          go work init .
+          go work use . ../mdk
+      - run: go vet ./...
+      - run: go test -v -coverprofile=coverage.out ./...
+      - run: go build ./...
+      - name: Go Coverage Report
+        uses: ncruces/go-coverage-report@v0
+        with:
+          report: 'true'
+          chart: 'true'
+          amend: 'true'
+        continue-on-error: true
