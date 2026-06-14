@@ -13,12 +13,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/GoHyperrr/mdk"
 	"github.com/GoHyperrr/mdk/mdktest"
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
 )
 
 func TestNotificationModule(t *testing.T) {
-	database, _ := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	database, _ := mdktest.SetupSharedTestDB("")
 	rt := mdktest.NewTestRuntime(database)
 	
 	// Create mock provider

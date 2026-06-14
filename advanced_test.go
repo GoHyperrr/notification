@@ -7,8 +7,6 @@ import (
 
 	"github.com/GoHyperrr/mdk"
 	"github.com/GoHyperrr/mdk/mdktest"
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
 )
 
 func TestTemplateResolution(t *testing.T) {
@@ -53,7 +51,7 @@ func TestCronParsing(t *testing.T) {
 }
 
 func TestAdvancedFeatures(t *testing.T) {
-	database, _ := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	database, _ := mdktest.SetupSharedTestDB("")
 	rt := mdktest.NewTestRuntime(database)
 	mockProv := &MockProvider{}
 
