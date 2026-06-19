@@ -5,4 +5,4 @@
 package notification
 
 // Version is the current version of the Hyperrr Notification Modules.
-const Version = "0.1.0"
+const Version = "0.4.0"
